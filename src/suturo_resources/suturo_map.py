@@ -1,42 +1,72 @@
+from __future__ import annotations
+
+import logging
+import threading
+import xml.etree.ElementTree as ElementTree
+from abc import ABC, abstractmethod
+from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import IntEnum, StrEnum
+from functools import cached_property
+
+import numpy as np
+import rclpy
+from ament_index_python.packages import get_packages_with_prefixes
+from typing_extensions import Self
+
+from semantic_digital_twin.adapters.package_resolver import CompositePathResolver
 from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
     VizMarkerPublisher,
 )
-from semantic_digital_twin.semantic_annotations.semantic_annotations import (
-    Table,
-    Sofa,
-    TrashCan,
-    Fridge, Counter_Top, Wall, Cabinet,
-    Cupboard,
-    Door,
-    Desk,
-    Handle,
-    ShelfLayer,
-    Hinge,
-)
-from semantic_digital_twin.world import World
-import threading
-import rclpy
-import numpy as np
 from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
-from semantic_digital_twin.semantic_annotations.semantic_annotations import Room, Floor
+from semantic_digital_twin.semantic_annotations.semantic_annotations import (
+    CounterTop,
+    Door,
+    Floor,
+    Fridge,
+    Handle,
+    Room,
+    Shelf,
+    ShelfLayer,
+    Sofa,
+    Table,
+    TrashCan,
+    Wall,
+)
+from semantic_digital_twin.spatial_types.derivatives import DerivativeMap
 from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
     Point3,
+    Vector3,
 )
-from semantic_digital_twin.spatial_types.derivatives import DerivativeMap
-from semantic_digital_twin.world_description.connections import FixedConnection, RevoluteConnection
-from semantic_digital_twin.world_description.geometry import Box, Scale, Color
-from semantic_digital_twin.world_description.geometry import Cylinder
+from semantic_digital_twin.specifications.connections import (
+    RevoluteConnectionSpecification,
+)
+from semantic_digital_twin.world import World
+from semantic_digital_twin.world_description.connections import FixedConnection
+from semantic_digital_twin.world_description.degree_of_freedom import (
+    DegreeOfFreedomLimits,
+)
+from semantic_digital_twin.world_description.geometry import (
+    Box,
+    Color,
+    Cylinder,
+    Mesh,
+    Scale,
+)
 from semantic_digital_twin.world_description.shape_collection import ShapeCollection
 from semantic_digital_twin.world_description.world_entity import Body
-from semantic_digital_twin.spatial_types.spatial_types import Vector3
-from semantic_digital_twin.world_description.degree_of_freedom import (
-    DegreeOfFreedomLimits, DegreeOfFreedom,
-)
+
+logger = logging.getLogger(__name__)
+
+# %% building the lab
+
 
 def load_environment():
     """
-    Initializes the world with a hierarchical scene graph containing walls, furniture, and room layouts.
+    Initializes the world with a hierarchical scene graph containing walls, furniture,
+    and room layouts.
+
     Returns the constructed World object representing the environment.
     """
     world = World()
@@ -47,6 +77,7 @@ def load_environment():
     build_environment_walls(world)
     build_environment_furniture(world)
     build_environment_rooms(world)
+    LabLook().dress(world)
 
     return world
 
@@ -54,8 +85,9 @@ def load_environment():
 def build_environment_walls(world: World):
     """
     Creates and connects all walls of the environment to the scene graph.
-    The walls are represented as Body objects connected via FixedConnections.
-    Returns the updated World object with walls integrated.
+
+    The walls are represented as Body objects connected via FixedConnections. Returns
+    the updated World object with walls integrated.
     """
     root = world.root
     root_transformation = HomogeneousTransformationMatrix.from_xyz_rpy(
@@ -65,100 +97,99 @@ def build_environment_walls(world: World):
     with world.modify_world():
         south_wall1 = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("south_wall1"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                y=-2.01
-            ),
+            name="south_wall1",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(y=-2.01),
             scale=Scale(x=0.05, y=1.00, z=3.00),
         )
 
         south_wall2 = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("south_wall2"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=-0.145, y=-1.45, yaw=np.pi/2
+            name="south_wall2",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(
+                x=-0.145, y=-1.45, yaw=np.pi / 2
             ),
             scale=Scale(x=0.05, y=0.29, z=3.00),
         )
 
         south_wall3 = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("south_wall3"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=-0.29, y=-0.9925
-            ),
+            name="south_wall3",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=-0.29, y=-0.9925),
             scale=Scale(x=0.05, y=1.085, z=1.00),
         )
 
         south_wall4 = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("south_wall4"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=-0.145, y=-0.45, yaw=np.pi/2
+            name="south_wall4",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(
+                x=-0.145, y=-0.45, yaw=np.pi / 2
             ),
             scale=Scale(x=0.05, y=0.29, z=1.00),
         )
 
         south_wall5 = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("south_wall5"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=-0.145, y=0.45, yaw=np.pi/2
+            name="south_wall5",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(
+                x=-0.145, y=0.45, yaw=np.pi / 2
             ),
             scale=Scale(0.05, 0.29, 1.00),
         )
 
         south_wall6 = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("south_wall6"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=-0.29025, y=1.80
-            ),
+            name="south_wall6",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=-0.29025, y=1.80),
             scale=Scale(0.05, 2.75, 1.00),
         )
 
         south_wall7 = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("south_wall7"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=-0.29025, y=5.16
-            ),
+            name="south_wall7",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=-0.29025, y=5.16),
             scale=Scale(0.05, 2.27, 1.00),
         )
 
         east_wall = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("east_wall"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=2.462, y=-2.535, yaw=np.pi/2
+            name="east_wall",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(
+                x=2.462, y=-2.535, yaw=np.pi / 2
             ),
             scale=Scale(0.05, 4.924, 3.00),
         )
 
         middle_wall = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("middle_wall"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=2.20975, y=5.00
-            ),
+            name="middle_wall",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=2.20975, y=5.00),
             scale=Scale(0.05, 2.67, 1.00),
         )
 
         west_wall = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("west_wall"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=1.9345, y=6.32, yaw=np.pi/2
+            name="west_wall",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(
+                x=1.9345, y=6.32, yaw=np.pi / 2
             ),
             scale=Scale(0.05, 4.449, 3.00),
         )
 
         north_wall = Wall.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("north_wall"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=4.949, y=1.51
-            ),
+            name="north_wall",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=4.949, y=1.51),
             scale=Scale(0.05, 8.04, 3.00),
         )
 
@@ -173,9 +204,8 @@ def build_environment_walls(world: World):
     root_C_north_west_wall = FixedConnection(
         parent=root,
         child=north_west_wall_body,
-        parent_T_connection_expression=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-            x=4.924, y=6.295, z=1.50
-        ),
+        parent_T_connection_expression=root_transformation
+        @ HomogeneousTransformationMatrix.from_xyz_rpy(x=4.924, y=6.295, z=1.50),
     )
 
     with world.modify_world():
@@ -185,7 +215,9 @@ def build_environment_walls(world: World):
 
 def build_environment_furniture(world: World):
     """
-    Adds furniture items and room layouts (kitchen, living room, bedroom, office) to the scene graph.
+    Adds furniture items and room layouts (kitchen, living room, bedroom, office) to the
+    scene graph.
+
     Connects furniture bodies and room structures hierarchically under the main root.
     Returns the updated World object with furniture integrated.
     """
@@ -206,289 +238,81 @@ def build_environment_furniture(world: World):
     root_C_ovenArea = FixedConnection(
         parent=root,
         child=ovenArea_body,
-        parent_T_connection_expression=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-            x=3.481, y=-2.181, z=0.745
-        ),
+        parent_T_connection_expression=root_transformation
+        @ HomogeneousTransformationMatrix.from_xyz_rpy(x=3.481, y=-2.181, z=0.745),
     )
 
+    LabShelf().build(world)
+
     with world.modify_world():
-        cupboard_scale = Scale(0.43, 0.80, 2.02)
-
-        cupboard = Cupboard.create_with_new_body_in_world(
-            name=PrefixedName("cupboard_annotation"),
-            world=world,
-            world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=4.55, y=4.72, z=1.01
-            ),
-            scale=cupboard_scale,
-            wall_thickness=0.02,
-        )
-        # Connect the cupboard tp 'root' , to ensure that the coordinates are relative to the room
-        cupboard_connection = cupboard.root.parent_connection
-        world.remove_connection(cupboard_connection)
-        cupboard_connection.parent = root
-        world.add_connection(cupboard_connection)
-
-        # create shelflayers manually and attach them directly to the cupboard
-        shelf_scale = Scale(0.40, 0.76, 0.02)
-
-        # Shelf 1
-        shelf_1_geom = ShapeCollection([Box(scale=shelf_scale, color=Color.WHITE())])
-        shelf_1_body = Body(
-            name=PrefixedName("cupboard_shelf_1_body"),
-            collision=shelf_1_geom,
-            visual=shelf_1_geom,
-        )
-        shelf_1 = ShelfLayer(root=shelf_1_body, name=PrefixedName("cupboard_shelf_1"))
-
-        cupboard_C_shelf_1 = FixedConnection(
-            parent=cupboard.root,
-            child=shelf_1_body,
-            parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=0, y=0, z=-0.5
-            ),
-        )
-        world.add_connection(cupboard_C_shelf_1)
-        world.add_semantic_annotation(shelf_1)
-        cupboard.add_shelf_layer(shelf_1)
-
-        # Shelf 2
-        shelf_2_geom = ShapeCollection([Box(scale=shelf_scale, color=Color.WHITE())])
-        shelf_2_body = Body(
-            name=PrefixedName("cupboard_shelf_2_body"),
-            collision=shelf_2_geom,
-            visual=shelf_2_geom,
-        )
-        shelf_2 = ShelfLayer(root=shelf_2_body, name=PrefixedName("cupboard_shelf_2"))
-
-        cupboard_C_shelf_2 = FixedConnection(
-            parent=cupboard.root,
-            child=shelf_2_body,
-            parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=0, y=0, z=0.5
-            ),
-        )
-        world.add_connection(cupboard_C_shelf_2)
-        world.add_semantic_annotation(shelf_2)
-        cupboard.add_shelf_layer(shelf_2)
-
-        # Creating doors manually and attaching them directly to the cupboard
-        # Door height 105.5 cm (1.055 m)
-        door_height = 1.055
-        # Position Z: Bottom of cupboard is at -cupboard_scale.z / 2.
-        # Door center should be at Bottom + door_height / 2
-        door_z_rel = -(cupboard_scale.z / 2) + (door_height / 2)
-
-        door_x_rel = -(cupboard_scale.x / 2) - 0.01
-        door_scale = Scale(0.02, 0.40, door_height)
-
-        # Define limits for doors
-        # Left door opens outwards (0 to +90 degrees)
-        left_lower = DerivativeMap[float](position=0.0)
-        left_upper = DerivativeMap[float](position=np.pi / 2)
-        left_door_limits = DegreeOfFreedomLimits(lower=left_lower, upper=left_upper)
-
-        # Right door opens outwards (-90 to 0 degrees)
-        right_lower = DerivativeMap[float](position=-np.pi / 2)
-        right_upper = DerivativeMap[float](position=0.0)
-        right_door_limits = DegreeOfFreedomLimits(lower=right_lower, upper=right_upper)
-
-        # Left Door (Open via Hinge)
-        # Create Hinge for the left door
-        hinge_left_body = Body(name=PrefixedName("cupboard_hinge_left_body"))
-        hinge_left = Hinge(
-            root=hinge_left_body,
-            name=PrefixedName("cupboard_hinge_left"),
-        )
-
-        cupboard_C_hinge_left = RevoluteConnection.create_with_dofs(
-            world=world,
-            parent=cupboard.root,
-            child=hinge_left_body,
-            parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=door_x_rel, y=-0.40, z=door_z_rel
-            ),
-            axis=Vector3.Z(),
-            dof_limits=left_door_limits,
-        )
-        world.add_connection(cupboard_C_hinge_left)
-        world.add_semantic_annotation(hinge_left)
-
-        # Create left door
-        door_left_geom = ShapeCollection([Box(scale=door_scale, color=Color.WHITE())])
-        door_left_body = Body(
-            name=PrefixedName("cupboard_door_left_body"),
-            collision=door_left_geom,
-            visual=door_left_geom,
-        )
-        door_left = Door(root=door_left_body, name=PrefixedName("cupboard_door_left"))
-
-        # Connect Door to Hinge (Fixed)
-        # Door center is at y=+0.20 relative to hinge (hinge at -0.40, door center at -0.20)
-        hinge_left_C_door_left = FixedConnection(
-            parent=hinge_left_body,
-            child=door_left_body,
-            parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=0, y=0.20, z=0
-            ),
-        )
-        world.add_connection(hinge_left_C_door_left)
-        world.add_semantic_annotation(door_left)
-        door_left.add_hinge(hinge_left)
-        cupboard.add_door(door_left)
-
-        # Right Door (Closed via Hinge)
-        hinge_right_body = Body(name=PrefixedName("cupboard_hinge_right_body"))
-        hinge_right = Hinge(
-            root=hinge_right_body,
-            name=PrefixedName("cupboard_hinge_right"),
-        )
-
-        cupboard_C_hinge_right = RevoluteConnection.create_with_dofs(
-            world=world,
-            parent=cupboard.root,
-            child=hinge_right_body,
-            parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=door_x_rel, y=0.40, z=door_z_rel
-            ),
-            axis=Vector3.Z(),
-            dof_limits=right_door_limits,
-        )
-        world.add_connection(cupboard_C_hinge_right)
-        world.add_semantic_annotation(hinge_right)
-
-        door_right_geom = ShapeCollection([Box(scale=door_scale, color=Color.WHITE())])
-        door_right_body = Body(
-            name=PrefixedName("cupboard_door_right_body"),
-            collision=door_right_geom,
-            visual=door_right_geom,
-        )
-        door_right = Door(root=door_right_body, name=PrefixedName("cupboard_door_right"))
-
-        hinge_right_C_door_right = FixedConnection(
-            parent=hinge_right_body,
-            child=door_right_body,
-            parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=0, y=-0.20, z=0
-            ),
-        )
-        world.add_connection(hinge_right_C_door_right)
-        world.add_semantic_annotation(door_right)
-        door_right.add_hinge(hinge_right)
-        cupboard.add_door(door_right)
-
-        # Creating handles manually and attaching them directly to the doors
-        handle_scale = Scale(0.04, 0.02, 0.02)
-        # Place handle at the center of the door
-        handle_z_local = 0.0
-
-        # Left Handle
-        handle_left_geom = ShapeCollection([Box(scale=handle_scale, color=Color.WHITE())])
-        handle_left_body = Body(
-            name=PrefixedName("cupboard_handle_left_body"),
-            collision=handle_left_geom,
-            visual=handle_left_geom,
-        )
-        handle_left = Handle(
-            root=handle_left_body, name=PrefixedName("cupboard_handle_left")
-        )
-
-        door_left_C_handle = FixedConnection(
-            parent=door_left.root,
-            child=handle_left_body,
-            parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=-0.01, y=0.16, z=handle_z_local, yaw=np.pi
-            ),
-        )
-        world.add_connection(door_left_C_handle)
-        world.add_semantic_annotation(handle_left)
-        door_left.add_handle(handle_left)
-
-        # Right Handle
-        handle_right_geom = ShapeCollection([Box(scale=handle_scale, color=Color.WHITE())])
-        handle_right_body = Body(
-            name=PrefixedName("cupboard_handle_right_body"),
-            collision=handle_right_geom,
-            visual=handle_right_geom,
-        )
-        handle_right = Handle(
-            root=handle_right_body, name=PrefixedName("cupboard_handle_right")
-        )
-
-        door_right_C_handle = FixedConnection(
-            parent=door_right.root,
-            child=handle_right_body,
-            parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=-0.01, y=-0.16, z=handle_z_local, yaw=np.pi
-            ),
-        )
-        world.add_connection(door_right_C_handle)
-        world.add_semantic_annotation(handle_right)
-        door_right.add_handle(handle_right)
-
-
 
         trash_can = TrashCan.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("trash_can"),
-            world_root_T_self=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                x=0.416, y=5.5, z=0.20
-            ),
+            name="trash_can",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=0.416, y=5.5, z=0.20),
             scale=Scale(x=0.30, y=0.30, z=0.40),
         )
 
         refrigerator = Fridge.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("refrigerator"),
-            world_root_T_self=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(
-                 x=0.537, y=-2.181, z=0.745, yaw=np.pi*3/2),
+            name="refrigerator",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(
+                x=0.537, y=-2.181, z=0.745, yaw=np.pi * 3 / 2
+            ),
             scale=Scale(x=0.60, y=0.658, z=1.49),
         )
 
-        counterTop = Counter_Top.create_with_new_body_in_world(
+        counterTop = CounterTop.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("counterTop"),
-            world_root_T_self= root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(x=1.859, y=-2.181, z=0.2725),
+            name="counterTop",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=1.859, y=-2.181, z=0.2725),
             scale=Scale(x=2.044, y=0.658, z=0.545),
         )
         for color in counterTop.bodies[0].visual.shapes:
             color.color = Color.BEIGE()
 
-
-        table = Table.create_with_new_body_in_world(
+        # The large table in the middle of the room is a counter top, like the island
+        # of the IAI kitchen. It keeps the name it was known by as a table.
+        table = CounterTop.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("table"),
-            world_root_T_self=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(x=3.545, y=0.426, z=0.4225),
+            name="table",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=3.545, y=0.426, z=0.4225),
             scale=Scale(x=2.45, y=0.796, z=0.845),
         )
 
         sofa = Sofa.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("sofa"),
-            world_root_T_self=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(x=3.60, y=1.20, z=0.34),
+            name="sofa",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=3.60, y=1.20, z=0.34),
             scale=Scale(x=1.68, y=0.94, z=0.68),
         )
-        for color in sofa.bodies[0].visual.shapes:
-            color.color = Color.BEIGE()
 
         lowerTable = Table.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("lowerTable"),
-            world_root_T_self=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(x=4.22, y=2.22, z=0.22),
+            name="lowerTable",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=4.22, y=2.22, z=0.22),
             scale=Scale(x=0.37, y=0.91, z=0.44),
         )
 
         desk = Table.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("desk"),
-            world_root_T_self=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(x=0.05, y=1.28, z=0.375),
+            name="desk",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=0.05, y=1.28, z=0.375),
             scale=Scale(x=0.60, y=1.20, z=0.75),
         )
 
         cooking_table = Table.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("cooking_table"),
-            world_root_T_self=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(x=1.325, y=5.99, z=0.355),
+            name="cooking_table",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=1.325, y=5.99, z=0.355),
             scale=Scale(1.75, 0.64, 0.71),
         )
         for color in cooking_table.bodies[0].visual.shapes:
@@ -496,9 +320,9 @@ def build_environment_furniture(world: World):
 
         dinning_table = Table.create_with_new_body_in_world(
             world=world,
-            name=PrefixedName("dining_table"),
-            world_root_T_self=root_transformation @ HomogeneousTransformationMatrix.from_xyz_rpy(x=2.59975, y=5.705,
-                                                                                                 z=0.365),
+            name="dining_table",
+            world_root_T_self=root_transformation
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(x=2.59975, y=5.705, z=0.365),
             scale=Scale(0.73, 1.18, 0.73),
         )
         for color in dinning_table.bodies[0].visual.shapes:
@@ -544,7 +368,7 @@ def build_environment_rooms(world: World):
         ]
 
         kitchen_floor = Floor.create_with_new_body_from_polytope_in_world(
-            name=PrefixedName("kitchen_floor"),
+            name="kitchen_floor",
             world=world,
             floor_polytope=kitchen_floor_polytope,
             world_root_T_self=root_transformation
@@ -553,7 +377,7 @@ def build_environment_rooms(world: World):
         kitchen = Room(floor=kitchen_floor, name=PrefixedName("kitchen"))
 
         living_room_floor = Floor.create_with_new_body_from_polytope_in_world(
-            name=PrefixedName("living_room_floor"),
+            name="living_room_floor",
             world=world,
             floor_polytope=living_room_floor_polytope,
             world_root_T_self=root_transformation
@@ -562,7 +386,7 @@ def build_environment_rooms(world: World):
         living_room = Room(floor=living_room_floor, name=PrefixedName("living_room"))
 
         bed_room_floor = Floor.create_with_new_body_from_polytope_in_world(
-            name=PrefixedName("bed_room_floor"),
+            name="bed_room_floor",
             world=world,
             floor_polytope=bed_room_floor_polytope,
             world_root_T_self=root_transformation
@@ -571,7 +395,7 @@ def build_environment_rooms(world: World):
         bed_room = Room(floor=bed_room_floor, name=PrefixedName("bed_room"))
 
         office_floor = Floor.create_with_new_body_from_polytope_in_world(
-            name=PrefixedName("office_floor"),
+            name="office_floor",
             world=world,
             floor_polytope=office_floor_polytope,
             world_root_T_self=root_transformation
@@ -580,6 +404,938 @@ def build_environment_rooms(world: World):
         office = Room(floor=office_floor, name=PrefixedName("office"))
 
     return world
+
+
+# %% the tall shelf
+
+
+class ShelfDoorSide(IntEnum):
+    """
+    The two doors of the tall shelf, valued by the direction along the shelf's y axis in
+    which each one lies.
+    """
+
+    LEFT = -1
+    RIGHT = 1
+
+
+@dataclass
+class LabShelf:
+    """
+    The tall shelf of the lab: a case standing on the floor, with shelf layers inside it
+    and two hinged doors closing off its lower part.
+    """
+
+    name_prefix: str = "cupboard"
+    """
+    What the names of the shelf's bodies and annotations begin with.
+    """
+
+    map_T_footprint: HomogeneousTransformationMatrix = field(
+        default_factory=lambda: HomogeneousTransformationMatrix.from_xyz_rpy(
+            x=4.55, y=4.72
+        )
+    )
+    """
+    Where the middle of the shelf's bottom stands in the map.
+    """
+
+    scale: Scale = field(default_factory=lambda: Scale(0.43, 0.80, 2.02))
+    """
+    The outer size of the case.
+
+    Its open front faces against its x axis.
+    """
+
+    wall_thickness: float = 0.02
+    """
+    How much thinner than the case its inside is, along each axis.
+    """
+
+    layer_heights: tuple[float, ...] = (0.51, 1.045, 1.51)
+    """
+    How high above the floor the middle of each shelf layer lies.
+
+    The layer at 1.045 m is flush with the top of the doors, so it closes off the
+    compartment behind them.
+    """
+
+    layer_scale: Scale = field(default_factory=lambda: Scale(0.40, 0.76, 0.02))
+    """
+    The size of each shelf layer.
+    """
+
+    door_height: float = 1.055
+    """
+    How high above the floor the doors reach.
+    """
+
+    door_thickness: float = 0.02
+    """
+    How thick each door is.
+    """
+
+    door_opening_angle: float = np.pi / 2
+    """
+    How far each door swings open, in radians.
+    """
+
+    handle_scale: Scale = field(default_factory=lambda: Scale(0.06, 0.02, 0.30))
+    """
+    The size of the upright bar handle on each door: how far it stands out of the door,
+    how wide and how long it is.
+    """
+
+    handle_inset: float = 0.04
+    """
+    How far each handle sits from the edge its door shares with the other door.
+    """
+
+    @property
+    def annotation_name(self) -> str:
+        """
+        The name of the shelf's annotation and of its case.
+        """
+        return f"{self.name_prefix}_annotation"
+
+    def layer_name(self, number: int) -> str:
+        """
+        :param number: The layer's number, counted from 1 at the bottom.
+        :return: The name of the layer's annotation and body.
+        """
+        return f"{self.name_prefix}_shelf_{number}"
+
+    def door_name(self, side: ShelfDoorSide) -> str:
+        """
+        :param side: Which door.
+        :return: The name of the door's annotation and body.
+        """
+        return f"{self.name_prefix}_door_{side.name.lower()}"
+
+    def handle_name(self, side: ShelfDoorSide) -> str:
+        """
+        :param side: Which door the handle is on.
+        :return: The name of the handle's annotation and body.
+        """
+        return f"{self.name_prefix}_handle_{side.name.lower()}"
+
+    def build(self, world: World) -> Shelf:
+        """
+        Spawn the shelf with its layers and doors.
+
+        :param world: The world to spawn into, whose root is the map.
+        :return: The shelf.
+        """
+        map_T_shelf = (
+            self.map_T_footprint
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(z=self.scale.z / 2)
+        )
+        with world.modify_world():
+            shelf = Shelf.get_annotation_specification(
+                self.annotation_name,
+                Shelf.get_default_root_kinematic_structure_entity_specification(
+                    scale=self.scale, wall_thickness=self.wall_thickness
+                ),
+            ).spawn(world, parent_T_self=map_T_shelf)
+            for number, height in enumerate(self.layer_heights, start=1):
+                shelf.add(self._spawn_layer(world, map_T_shelf, number, height))
+            doors = [
+                self._spawn_door(world, map_T_shelf, side) for side in ShelfDoorSide
+            ]
+            for door in doors:
+                shelf.add(door)
+        for door, side in zip(doors, ShelfDoorSide):
+            door.mount_on_movable_joint(self._hinge_of(side))
+        return shelf
+
+    def _spawn_layer(
+        self,
+        world: World,
+        map_T_shelf: HomogeneousTransformationMatrix,
+        number: int,
+        height: float,
+    ) -> ShelfLayer:
+        """
+        :param world: The world to spawn into.
+        :param map_T_shelf: Where the middle of the case lies in the map.
+        :param number: The layer's number, see :meth:`layer_name`.
+        :param height: How high above the floor the middle of the layer lies.
+        :return: The layer, not yet part of the shelf.
+        """
+        return ShelfLayer.create_with_new_body_in_world(
+            world=world,
+            name=self.layer_name(number),
+            world_root_T_self=map_T_shelf
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(z=height - self.scale.z / 2),
+            scale=self.layer_scale,
+        )
+
+    def _spawn_door(
+        self,
+        world: World,
+        map_T_shelf: HomogeneousTransformationMatrix,
+        side: ShelfDoorSide,
+    ) -> Door:
+        """
+        Spawn a door in front of the case, with its handle next to the other door.
+
+        :param world: The world to spawn into.
+        :param map_T_shelf: Where the middle of the case lies in the map.
+        :param side: Which door.
+        :return: The door with its handle, not yet part of the shelf nor hinged.
+        """
+        door_width = self.scale.y / 2
+        map_T_door = map_T_shelf @ HomogeneousTransformationMatrix.from_xyz_rpy(
+            x=-(self.scale.x + self.door_thickness) / 2,
+            y=side * door_width / 2,
+            z=(self.door_height - self.scale.z) / 2,
+        )
+        door = Door.create_with_new_body_in_world(
+            world=world,
+            name=self.door_name(side),
+            scale=Scale(self.door_thickness, door_width, self.door_height),
+            world_root_T_self=map_T_door,
+        )
+        handle = Handle.create_with_new_body_in_world(
+            world=world,
+            name=self.handle_name(side),
+            scale=self.handle_scale,
+            world_root_T_self=map_T_door
+            @ HomogeneousTransformationMatrix.from_xyz_rpy(
+                x=-self.door_thickness / 2 - self.handle_scale.x,
+                y=-side * (door_width / 2 - self.handle_inset),
+                yaw=np.pi,
+            ),
+        )
+        door.add(handle)
+        return door
+
+    def _hinge_of(self, side: ShelfDoorSide) -> RevoluteConnectionSpecification:
+        """
+        :param side: Which door.
+        :return: The hinge the door swings outwards on.
+        """
+        lower, upper = sorted((0.0, -side * self.door_opening_angle))
+        return RevoluteConnectionSpecification(
+            axis=Vector3.Z(),
+            dof_limits=DegreeOfFreedomLimits(
+                lower=DerivativeMap[float](position=lower),
+                upper=DerivativeMap[float](position=upper),
+            ),
+        )
+
+
+# %% the parts furniture is drawn from
+
+
+@dataclass
+class FurniturePart:
+    """
+    One visual shape of a piece of furniture, posed in the frame of the furniture.
+    """
+
+    root_T_part: np.ndarray
+    """
+    Where the shape sits in the frame of the furniture.
+    """
+
+    size: np.ndarray
+    """
+    The scale of a mesh, or the size of a box, along the shape's own axes.
+    """
+
+    mesh_file: str | None = None
+    """
+    The mesh file the shape is read from, or ``None`` for a box.
+    """
+
+    mesh_bounds: np.ndarray | None = None
+    """
+    The lower and upper corner of the unscaled mesh, or ``None`` for a box.
+    """
+
+    color: Color = field(default_factory=Color.WHITE)
+    """
+    The color of a box.
+
+    A mesh keeps the materials of its file.
+    """
+
+    @classmethod
+    def box(
+        cls,
+        lower: tuple[float, float, float],
+        upper: tuple[float, float, float],
+        color: Color,
+    ) -> Self:
+        """
+        :param lower: The lower corner of the box, in the frame of the furniture.
+        :param upper: The upper corner of the box, in the frame of the furniture.
+        :param color: The color of the box.
+        :return: The box spanning the two corners.
+        """
+        lower, upper = np.array(lower), np.array(upper)
+        root_T_part = np.eye(4)
+        root_T_part[:3, 3] = (lower + upper) / 2
+        return cls(root_T_part, upper - lower, color=color)
+
+    def corners_in_root(self) -> np.ndarray:
+        """
+        :return: The corners of the shape's bounding box, in the frame of the furniture.
+        """
+        if self.mesh_file is None:
+            lower, upper = -self.size / 2, self.size / 2
+        else:
+            lower, upper = self.mesh_bounds * self.size
+        corners = np.array(
+            [
+                [x, y, z, 1.0]
+                for x in (lower[0], upper[0])
+                for y in (lower[1], upper[1])
+                for z in (lower[2], upper[2])
+            ]
+        )
+        return (self.root_T_part @ corners.T).T[:, :3]
+
+    def stretched_shape(
+        self, body_T_part: np.ndarray, stretch: np.ndarray
+    ) -> Box | Mesh:
+        """
+        :param body_T_part: Where the shape sits in the frame of the body it is drawn on.
+        :param stretch: How much the shape is stretched along each of the body's axes.
+        :return: The shape, stretched.
+        """
+        part_axes_stretch = np.abs(body_T_part[:3, :3]).T @ stretch
+        origin = HomogeneousTransformationMatrix(body_T_part)
+        scale = Scale(*(self.size * part_axes_stretch))
+        if self.mesh_file is None:
+            return Box(origin=origin, scale=scale, color=self.color)
+        return Mesh(filename=self.mesh_file, origin=origin, scale=scale)
+
+
+# %% the look of a piece of furniture
+
+
+@dataclass
+class TopBoard:
+    """
+    A board laid on top of a piece of furniture, in a color of its own.
+    """
+
+    thickness: float
+    """
+    How thick the board is.
+    """
+
+    color: Color
+    """
+    The color of the board.
+    """
+
+
+@dataclass
+class FurnitureLook(ABC):
+    """
+    How a body of the lab looks: a piece of furniture stretched along each axis until it
+    fills the bounding box of the body's collision geometry, so the body keeps its size
+    and collision geometry.
+    """
+
+    front_yaw: float
+    """
+    The turn about the body's z axis that points the furniture's front, its x axis, the
+    way the body faces; a multiple of a quarter turn.
+    """
+
+    top_board: TopBoard | None = field(default=None, kw_only=True)
+    """
+    The board laid on top of the furniture, which the furniture leaves room for, or
+    ``None`` for none.
+    """
+
+    @abstractmethod
+    def parts(self) -> list[FurniturePart]:
+        """
+        :return: The shapes of the furniture, in its own frame.
+        """
+
+    def dress(self, body: Body) -> None:
+        """
+        Replace the body's shapes by those of :meth:`visual_shapes` and
+        :meth:`collision_shapes`.
+
+        :param body: The body to dress.
+        """
+        body.update_shapes(
+            visual=self.visual_shapes(body), collision=self.collision_shapes(body)
+        )
+
+    def collision_shapes(self, body: Body) -> ShapeCollection:
+        """
+        :param body: The body to dress.
+        :return: The shapes the body collides with once dressed: its own.
+        """
+        return body.collision
+
+    def visual_shapes(self, body: Body) -> ShapeCollection:
+        """
+        :param body: The body to dress.
+        :return: The furniture with its :attr:`top_board` on top, stretched together to
+            fill the bounding box of the body's collision geometry.
+        """
+        parts = self.parts()
+        corners = np.concatenate([part.corners_in_root() for part in parts])
+        lower, upper = corners.min(axis=0), corners.max(axis=0)
+        box = body.collision.as_bounding_box_collection_in_frame(body).bounding_box()
+        body_lower = np.array([box.min_x, box.min_y, box.min_z])
+        body_upper = np.array([box.max_x, box.max_y, box.max_z])
+        shapes = []
+        if self.top_board is not None:
+            board_bottom = box.max_z - self.top_board.thickness
+            board = FurniturePart.box(
+                (box.min_x, box.min_y, board_bottom),
+                (box.max_x, box.max_y, box.max_z),
+                self.top_board.color,
+            )
+            shapes.append(board.stretched_shape(board.root_T_part, np.ones(3)))
+            body_upper[2] = board_bottom
+        body_T_front = HomogeneousTransformationMatrix.from_xyz_rpy(
+            *((body_lower + body_upper) / 2), yaw=self.front_yaw
+        ).to_np()
+        stretch = (
+            np.abs(body_T_front[:3, :3]).T @ (body_upper - body_lower) / (upper - lower)
+        )
+        for part in parts:
+            front_T_part = part.root_T_part.copy()
+            front_T_part[:3, 3] = stretch * (
+                part.root_T_part[:3, 3] - (lower + upper) / 2
+            )
+            shapes.append(
+                part.stretched_shape(
+                    body_T_front @ front_T_part, np.abs(body_T_front[:3, :3]) @ stretch
+                )
+            )
+        return ShapeCollection(shapes)
+
+
+@dataclass
+class SofaLook(FurnitureLook):
+    """
+    A simple sofa: a base on four feet, two armrests, a backrest, and two seat and two
+    back cushions, with its front along x, standing on z = 0.
+    """
+
+    depth: float = 0.94
+    """
+    How deep the sofa is from its back to its front.
+    """
+
+    width: float = 1.68
+    """
+    How wide the sofa is from one armrest to the other.
+    """
+
+    height: float = 0.68
+    """
+    How high the backrest reaches.
+    """
+
+    foot_height: float = 0.06
+    """
+    How high the feet lift the base.
+    """
+
+    foot_width: float = 0.06
+    """
+    How wide and deep each foot is.
+    """
+
+    foot_inset: float = 0.03
+    """
+    How far each foot stands in from the corners of the base.
+    """
+
+    base_top: float = 0.24
+    """
+    How high the base reaches, on which the cushions rest.
+    """
+
+    seat_top: float = 0.42
+    """
+    How high the seat cushions reach.
+    """
+
+    armrest_top: float = 0.58
+    """
+    How high the armrests reach.
+    """
+
+    armrest_width: float = 0.16
+    """
+    How wide each armrest is.
+    """
+
+    backrest_depth: float = 0.18
+    """
+    How deep the backrest is.
+    """
+
+    back_cushion_depth: float = 0.15
+    """
+    How deep the back cushions are.
+    """
+
+    back_cushion_top: float = 0.66
+    """
+    How high the back cushions reach.
+    """
+
+    cushion_gap: float = 0.01
+    """
+    The gap between the left and the right cushions.
+    """
+
+    fabric: Color = field(default_factory=lambda: Color(0.33, 0.38, 0.46))
+    """
+    The color of the base, the armrests and the backrest.
+    """
+
+    cushion: Color = field(default_factory=lambda: Color(0.42, 0.48, 0.57))
+    """
+    The color of the cushions.
+    """
+
+    wood: Color = field(default_factory=lambda: Color(0.25, 0.17, 0.10))
+    """
+    The color of the feet.
+    """
+
+    def parts(self) -> list[FurniturePart]:
+        back, front = -self.depth / 2, self.depth / 2
+        outer = self.width / 2
+        inner = outer - self.armrest_width
+        foot_middle = self.foot_inset + self.foot_width / 2
+        parts = [
+            FurniturePart.box(
+                (x - self.foot_width / 2, y - self.foot_width / 2, 0.0),
+                (x + self.foot_width / 2, y + self.foot_width / 2, self.foot_height),
+                self.wood,
+            )
+            for x in (back + foot_middle, front - foot_middle)
+            for y in (-outer + foot_middle, outer - foot_middle)
+        ]
+        parts += [
+            FurniturePart.box(
+                (back, -outer, self.foot_height),
+                (front, outer, self.base_top),
+                self.fabric,
+            ),
+            FurniturePart.box(
+                (back, -outer, self.base_top),
+                (front, -inner, self.armrest_top),
+                self.fabric,
+            ),
+            FurniturePart.box(
+                (back, inner, self.base_top),
+                (front, outer, self.armrest_top),
+                self.fabric,
+            ),
+            FurniturePart.box(
+                (back, -inner, self.base_top),
+                (back + self.backrest_depth, inner, self.height),
+                self.fabric,
+            ),
+        ]
+        seat_back = back + self.backrest_depth
+        for left, right in (
+            (-inner, -self.cushion_gap / 2),
+            (self.cushion_gap / 2, inner),
+        ):
+            parts += [
+                FurniturePart.box(
+                    (seat_back, left, self.base_top),
+                    (front, right, self.seat_top),
+                    self.cushion,
+                ),
+                FurniturePart.box(
+                    (seat_back, left, self.seat_top),
+                    (seat_back + self.back_cushion_depth, right, self.back_cushion_top),
+                    self.cushion,
+                ),
+            ]
+        return parts
+
+
+# %% the look of the IAI kitchen
+
+
+class IAIKitchenResource(StrEnum):
+    """
+    The files of the ``iai_kitchen`` package the lab's furniture is drawn from.
+    """
+
+    URDF = "package://iai_kitchen/urdf_obj/kitchen.urdf"
+
+
+class IAIKitchenLink(StrEnum):
+    """
+    The links of the IAI kitchen's URDF the furniture of the lab is drawn from.
+    """
+
+    SINK_AREA = "sink_area"
+    OVEN_AREA = "oven_area_area"
+    FRIDGE_AREA = "fridge_area"
+    KITCHEN_ISLAND = "kitchen_island"
+    BIG_TABLE = "table_area_main"
+    DINING_TABLE = "dining_area_jokkmokk_table_main"
+    FRIDGE_DOOR = "iai_fridge_door"
+    FRIDGE_DOOR_HANDLE = "iai_fridge_door_handle"
+
+
+@dataclass
+class IAIKitchen:
+    """
+    The IAI kitchen of the ``iai_kitchen`` package, read as furniture parts.
+    """
+
+    package_name: str = "iai_kitchen"
+    """
+    The ROS package the kitchen is described in.
+    """
+
+    resolver: CompositePathResolver = field(default_factory=CompositePathResolver)
+    """
+    Resolves the package's files to local paths.
+    """
+
+    mesh_bounds: dict[str, np.ndarray] = field(default_factory=dict, init=False)
+    """
+    The lower and upper corner of every mesh read so far, by file.
+    """
+
+    @property
+    def is_installed(self) -> bool:
+        """
+        Whether the package is installed in the ROS workspace.
+        """
+        return self.package_name in get_packages_with_prefixes()
+
+    @cached_property
+    def urdf(self) -> ElementTree.Element:
+        """
+        The root element of the kitchen's URDF.
+        """
+        return ElementTree.parse(
+            self.resolver.resolve(IAIKitchenResource.URDF)
+        ).getroot()
+
+    @cached_property
+    def material_colors(self) -> dict[str, Color]:
+        """
+        The colors of the URDF's named materials.
+        """
+        return {
+            material.get("name"): Color(
+                *self._vector(material.find("color").get("rgba"))
+            )
+            for material in self.urdf.findall("material")
+            if material.find("color") is not None
+        }
+
+    def parts_of(
+        self, root_link: IAIKitchenLink, with_descendants: bool = True
+    ) -> list[FurniturePart]:
+        """
+        Collect the visual shapes of a piece of the kitchen's furniture, with every
+        joint standing at zero, so drawers are shut and doors closed.
+
+        :param root_link: The link the furniture hangs from.
+        :param with_descendants: Whether the links hanging from ``root_link`` belong to
+            the furniture.
+        :return: Its shapes, in the frame of ``root_link``.
+        """
+        links = {link.get("name"): link for link in self.urdf.findall("link")}
+        joints_by_parent = defaultdict(list)
+        for joint in self.urdf.findall("joint"):
+            joints_by_parent[joint.find("parent").get("link")].append(joint)
+
+        parts = []
+        links_to_collect = [(str(root_link), np.eye(4))]
+        while links_to_collect:
+            link_name, root_T_link = links_to_collect.pop()
+            parts += [
+                self._part_of(visual, root_T_link)
+                for visual in links[link_name].findall("visual")
+            ]
+            if not with_descendants:
+                continue
+            links_to_collect += [
+                (
+                    joint.find("child").get("link"),
+                    root_T_link @ self._transform_of(joint.find("origin")),
+                )
+                for joint in joints_by_parent[link_name]
+            ]
+        return parts
+
+    def _part_of(
+        self, visual: ElementTree.Element, root_T_link: np.ndarray
+    ) -> FurniturePart:
+        """
+        :param visual: A ``visual`` element holding a mesh or a box.
+        :param root_T_link: Where the visual's link lies in the furniture's frame.
+        :return: The visual as a part of the furniture.
+        """
+        root_T_part = root_T_link @ self._transform_of(visual.find("origin"))
+        geometry = visual.find("geometry")[0]
+        if geometry.tag == "box":
+            return FurniturePart(
+                root_T_part,
+                self._vector(geometry.get("size")),
+                color=self._color_of(visual),
+            )
+        return self._mesh_part(
+            root_T_part,
+            str(self.resolver.resolve(geometry.get("filename"))),
+            self._vector(geometry.get("scale", "1 1 1")),
+        )
+
+    def _mesh_part(
+        self, root_T_part: np.ndarray, mesh_file: str, scale: np.ndarray
+    ) -> FurniturePart:
+        """
+        :param root_T_part: Where the mesh sits in the furniture's frame.
+        :param mesh_file: The local path of the mesh.
+        :param scale: The scale the URDF gives the mesh.
+        :return: The mesh as a part of the furniture.
+        """
+        if mesh_file not in self.mesh_bounds:
+            self.mesh_bounds[mesh_file] = Mesh(filename=mesh_file).unscaled_mesh.bounds
+        return FurniturePart(
+            root_T_part, scale, mesh_file, mesh_bounds=self.mesh_bounds[mesh_file]
+        )
+
+    def _color_of(self, visual: ElementTree.Element) -> Color:
+        """
+        :param visual: A ``visual`` element of the URDF.
+        :return: The color the visual is painted in, white if it names none.
+        """
+        material = visual.find("material")
+        if material is None:
+            return Color.WHITE()
+        color = material.find("color")
+        if color is not None:
+            return Color(*self._vector(color.get("rgba")))
+        return self.material_colors.get(material.get("name"), Color.WHITE())
+
+    @staticmethod
+    def _vector(text: str) -> np.ndarray:
+        """
+        :param text: A URDF attribute holding numbers separated by spaces.
+        :return: The numbers.
+        """
+        return np.array([float(value) for value in text.split()])
+
+    @classmethod
+    def _transform_of(cls, origin: ElementTree.Element | None) -> np.ndarray:
+        """
+        :param origin: The ``origin`` element of a joint or a visual.
+        :return: The transform it describes.
+        """
+        if origin is None:
+            return np.eye(4)
+        roll, pitch, yaw = cls._vector(origin.get("rpy", "0 0 0"))
+        return HomogeneousTransformationMatrix.from_xyz_rpy(
+            *cls._vector(origin.get("xyz", "0 0 0")), roll=roll, pitch=pitch, yaw=yaw
+        ).to_np()
+
+
+@dataclass
+class IAIKitchenLook(FurnitureLook):
+    """
+    The look of a piece of the IAI kitchen's furniture.
+    """
+
+    kitchen: IAIKitchen = field(kw_only=True)
+    """
+    The kitchen the furniture is part of.
+    """
+
+    root_link: IAIKitchenLink = field(kw_only=True)
+    """
+    The link the furniture hangs from.
+    """
+
+    with_descendants: bool = field(default=True, kw_only=True)
+    """
+    Whether the links hanging from :attr:`root_link` belong to the furniture, such as
+    the drawers and handles of a rack.
+    """
+
+    def parts(self) -> list[FurniturePart]:
+        return self.kitchen.parts_of(self.root_link, self.with_descendants)
+
+
+@dataclass
+class IAIKitchenTableLook(IAIKitchenLook):
+    """
+    The look of a table of the IAI kitchen, which collides as a top on four legs rather
+    than as a solid block, so the space beneath its top stays free.
+    """
+
+    top_thickness: float = field(default=0.04, kw_only=True)
+    """
+    How thick the table top is.
+    """
+
+    leg_width: float = field(default=0.05, kw_only=True)
+    """
+    How wide and deep each leg is.
+    """
+
+    def collision_shapes(self, body: Body) -> ShapeCollection:
+        """
+        :param body: The table's body.
+        :return: A top and four legs at its corners, filling the bounding box of the
+            body's own collision geometry.
+        """
+        box = body.collision.as_bounding_box_collection_in_frame(body).bounding_box()
+        top_bottom = box.max_z - self.top_thickness
+        parts = [
+            FurniturePart.box(
+                (box.min_x, box.min_y, top_bottom),
+                (box.max_x, box.max_y, box.max_z),
+                Color.WHITE(),
+            )
+        ]
+        parts += [
+            FurniturePart.box(
+                (x, y, box.min_z),
+                (x + self.leg_width, y + self.leg_width, top_bottom),
+                Color.WHITE(),
+            )
+            for x in (box.min_x, box.max_x - self.leg_width)
+            for y in (box.min_y, box.max_y - self.leg_width)
+        ]
+        return ShapeCollection(
+            [part.stretched_shape(part.root_T_part, np.ones(3)) for part in parts]
+        )
+
+
+# %% the look of the lab
+
+
+class LabBody(StrEnum):
+    """
+    The bodies of the lab that are given a look of their own.
+    """
+
+    COUNTER_TOP = "counterTop"
+    OVEN_AREA = "ovenArea_body"
+    REFRIGERATOR = "refrigerator"
+    MIDDLE_COUNTER_TOP = "table"
+    COOKING_TABLE = "cooking_table"
+    DESK = "desk"
+    DINING_TABLE = "dining_table"
+    LOW_TABLE = "lowerTable"
+    SOFA = "sofa"
+
+
+@dataclass
+class LabLook:
+    """
+    The look of the lab's furniture: the IAI kitchen's furniture and a simple sofa,
+    stretched to the size of the lab's own.
+    """
+
+    kitchen: IAIKitchen = field(default_factory=IAIKitchen)
+    """
+    The kitchen the lab's kitchen furniture is drawn from.
+    """
+
+    shelf: LabShelf = field(default_factory=LabShelf)
+    """
+    The tall shelf, whose doors and handles are drawn from the kitchen.
+    """
+
+    @property
+    def table_names(self) -> tuple[LabBody, ...]:
+        """
+        The tables of the lab, which stand on legs.
+        """
+        return (
+            LabBody.COOKING_TABLE,
+            LabBody.DESK,
+            LabBody.DINING_TABLE,
+            LabBody.LOW_TABLE,
+        )
+
+    def kitchen_looks(self) -> dict[str, FurnitureLook]:
+        """
+        :return: The look of every body drawn from the IAI kitchen, by the body's name.
+        """
+        looks = {
+            LabBody.COUNTER_TOP: IAIKitchenLook(
+                np.pi / 2, kitchen=self.kitchen, root_link=IAIKitchenLink.SINK_AREA
+            ),
+            LabBody.OVEN_AREA: IAIKitchenLook(
+                np.pi / 2, kitchen=self.kitchen, root_link=IAIKitchenLink.OVEN_AREA
+            ),
+            LabBody.REFRIGERATOR: IAIKitchenLook(
+                np.pi, kitchen=self.kitchen, root_link=IAIKitchenLink.FRIDGE_AREA
+            ),
+            LabBody.MIDDLE_COUNTER_TOP: IAIKitchenLook(
+                -np.pi / 2,
+                kitchen=self.kitchen,
+                root_link=IAIKitchenLink.KITCHEN_ISLAND,
+            ),
+            LabBody.COOKING_TABLE: IAIKitchenTableLook(
+                0.0, kitchen=self.kitchen, root_link=IAIKitchenLink.BIG_TABLE
+            ),
+            LabBody.DESK: IAIKitchenTableLook(
+                np.pi / 2, kitchen=self.kitchen, root_link=IAIKitchenLink.BIG_TABLE
+            ),
+            LabBody.DINING_TABLE: IAIKitchenTableLook(
+                np.pi / 2, kitchen=self.kitchen, root_link=IAIKitchenLink.DINING_TABLE
+            ),
+            LabBody.LOW_TABLE: IAIKitchenTableLook(
+                np.pi / 2, kitchen=self.kitchen, root_link=IAIKitchenLink.DINING_TABLE
+            ),
+        }
+        for side in ShelfDoorSide:
+            looks[self.shelf.door_name(side)] = IAIKitchenLook(
+                np.pi,
+                kitchen=self.kitchen,
+                root_link=IAIKitchenLink.FRIDGE_DOOR,
+                with_descendants=False,
+            )
+            looks[self.shelf.handle_name(side)] = IAIKitchenLook(
+                0.0,
+                kitchen=self.kitchen,
+                root_link=IAIKitchenLink.FRIDGE_DOOR_HANDLE,
+            )
+        return looks
+
+    def dress(self, world: World) -> None:
+        """
+        Give the lab's furniture its look.
+
+        The furniture drawn from the IAI kitchen stays plain if the kitchen's package is
+        not installed.
+
+        :param world: The world holding the lab.
+        """
+        looks = {LabBody.SOFA: SofaLook(np.pi / 2)}
+        if self.kitchen.is_installed:
+            looks |= self.kitchen_looks()
+        else:
+            logger.warning(
+                f"The lab's kitchen furniture stays plain: the package "
+                f"{self.kitchen.package_name} is not installed."
+            )
+        with world.modify_world():
+            for body_name, look in looks.items():
+                look.dress(world.get_body_by_name(body_name))
 
 
 class Publisher:
